@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, Trash2, UserCircle2, Shirt, Smile } from 'lucide-react'
+import { Plus, Trash2, UserCircle2, Shirt, Smile, IdCard } from 'lucide-react'
 import { toast } from 'sonner'
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 import type {
@@ -7,20 +7,19 @@ import type {
   CharacterExpression,
   CharacterOutfit,
 } from '@/types'
-import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +49,11 @@ const EMPTY_CHAR: CharForm = {
 
 const EMPTY_NESTED: NestedForm = { label: '', prompt_desc: '' }
 
+type SheetState =
+  | { mode: 'create'; saved: Character | null }
+  | { mode: 'edit'; row: Character }
+  | null
+
 type DeleteTarget =
   | { kind: 'character'; row: Character }
   | { kind: 'outfit'; row: CharacterOutfit }
@@ -58,37 +62,32 @@ type DeleteTarget =
 
 export function CharacterMatrix() {
   const [characters, setCharacters] = useState<Character[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [outfits, setOutfits] = useState<CharacterOutfit[]>([])
-  const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadingNested, setLoadingNested] = useState(false)
 
-  const [charDialog, setCharDialog] = useState<
-    | { mode: 'create' }
-    | { mode: 'edit'; row: Character }
-    | null
-  >(null)
+  const [sheetState, setSheetState] = useState<SheetState>(null)
+  const [activeTab, setActiveTab] = useState<'bio' | 'wardrobe' | 'expressions'>(
+    'bio',
+  )
   const [charForm, setCharForm] = useState<CharForm>(EMPTY_CHAR)
 
-  const [outfitDialog, setOutfitDialog] = useState<
-    | { mode: 'create' }
-    | { mode: 'edit'; row: CharacterOutfit }
-    | null
-  >(null)
-  const [outfitForm, setOutfitForm] = useState<NestedForm>(EMPTY_NESTED)
+  const [outfits, setOutfits] = useState<CharacterOutfit[]>([])
+  const [expressions, setExpressions] = useState<CharacterExpression[]>([])
+  const [loadingNested, setLoadingNested] = useState(false)
 
-  const [exprDialog, setExprDialog] = useState<
-    | { mode: 'create' }
-    | { mode: 'edit'; row: CharacterExpression }
-    | null
-  >(null)
+  const [outfitForm, setOutfitForm] = useState<NestedForm>(EMPTY_NESTED)
   const [exprForm, setExprForm] = useState<NestedForm>(EMPTY_NESTED)
 
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const selected = characters.find((c) => c.id === selectedId) ?? null
+  // Active character = the one currently being edited, OR a freshly-saved
+  // create-mode character. Null means tabs 2/3 stay disabled.
+  const activeChar: Character | null =
+    sheetState?.mode === 'edit'
+      ? sheetState.row
+      : sheetState?.mode === 'create'
+        ? sheetState.saved
+        : null
 
   async function fetchCharacters() {
     if (!isSupabaseConfigured) {
@@ -105,9 +104,7 @@ export function CharacterMatrix() {
       toast.error('Gagal memuat character', { description: error.message })
       return
     }
-    const rows = (data ?? []) as Character[]
-    setCharacters(rows)
-    if (!selectedId && rows.length > 0) setSelectedId(rows[0].id)
+    setCharacters((data ?? []) as Character[])
   }
 
   async function fetchNested(characterId: string) {
@@ -127,7 +124,9 @@ export function CharacterMatrix() {
     ])
     setLoadingNested(false)
     if (outfitRes.error) {
-      toast.error('Gagal memuat outfits', { description: outfitRes.error.message })
+      toast.error('Gagal memuat outfits', {
+        description: outfitRes.error.message,
+      })
     } else {
       setOutfits((outfitRes.data ?? []) as CharacterOutfit[])
     }
@@ -145,32 +144,36 @@ export function CharacterMatrix() {
      
   }, [])
 
-  useEffect(() => {
-    if (selectedId) {
-      void fetchNested(selectedId)
-    } else {
-      setOutfits([])
-      setExpressions([])
-    }
-     
-  }, [selectedId])
-
-  // ---------- Character CRUD ----------
-  function openCreateChar() {
+  // ---------- Sheet open/close ----------
+  function openCreate() {
     setCharForm(EMPTY_CHAR)
-    setCharDialog({ mode: 'create' })
+    setOutfits([])
+    setExpressions([])
+    setOutfitForm(EMPTY_NESTED)
+    setExprForm(EMPTY_NESTED)
+    setActiveTab('bio')
+    setSheetState({ mode: 'create', saved: null })
   }
 
-  function openEditChar(row: Character) {
+  function openEdit(row: Character) {
     setCharForm({
       name: row.name,
       body_dna: row.body_dna,
       face_features: row.face_features,
       avatar_url: row.avatar_url ?? '',
     })
-    setCharDialog({ mode: 'edit', row })
+    setOutfitForm(EMPTY_NESTED)
+    setExprForm(EMPTY_NESTED)
+    setActiveTab('bio')
+    setSheetState({ mode: 'edit', row })
+    void fetchNested(row.id)
   }
 
+  function closeSheet() {
+    setSheetState(null)
+  }
+
+  // ---------- Character CRUD ----------
   async function submitCharacter(e: React.FormEvent) {
     e.preventDefault()
     if (!charForm.name.trim()) {
@@ -185,26 +188,50 @@ export function CharacterMatrix() {
       avatar_url: charForm.avatar_url.trim() || null,
     }
 
-    if (charDialog?.mode === 'create') {
-      const { data, error } = await supabase
-        .from('characters')
-        .insert(payload)
-        .select()
-        .single()
-      setSubmitting(false)
-      if (error) {
-        toast.error('Gagal membuat character', { description: error.message })
-        return
+    if (sheetState?.mode === 'create') {
+      const target = sheetState.saved
+      // If we already inserted in this create-flow, treat subsequent saves as updates.
+      if (target) {
+        const { data, error } = await supabase
+          .from('characters')
+          .update(payload)
+          .eq('id', target.id)
+          .select()
+          .single()
+        setSubmitting(false)
+        if (error) {
+          toast.error('Gagal update character', {
+            description: error.message,
+          })
+          return
+        }
+        const updated = data as Character
+        setCharacters((prev) =>
+          prev.map((c) => (c.id === updated.id ? updated : c)),
+        )
+        setSheetState({ mode: 'create', saved: updated })
+        toast.success('Character diperbarui')
+      } else {
+        const { data, error } = await supabase
+          .from('characters')
+          .insert(payload)
+          .select()
+          .single()
+        setSubmitting(false)
+        if (error) {
+          toast.error('Gagal membuat character', { description: error.message })
+          return
+        }
+        const created = data as Character
+        setCharacters((prev) => [...prev, created])
+        setSheetState({ mode: 'create', saved: created })
+        toast.success('Character dibuat. Tab Wardrobe & Expressions aktif.')
       }
-      const created = data as Character
-      setCharacters((prev) => [...prev, created])
-      setSelectedId(created.id)
-      toast.success('Character dibuat')
-    } else if (charDialog?.mode === 'edit') {
+    } else if (sheetState?.mode === 'edit') {
       const { data, error } = await supabase
         .from('characters')
         .update(payload)
-        .eq('id', charDialog.row.id)
+        .eq('id', sheetState.row.id)
         .select()
         .single()
       setSubmitting(false)
@@ -216,126 +243,68 @@ export function CharacterMatrix() {
       setCharacters((prev) =>
         prev.map((c) => (c.id === updated.id ? updated : c)),
       )
+      setSheetState({ mode: 'edit', row: updated })
       toast.success('Character diperbarui')
     }
-    setCharDialog(null)
   }
 
   // ---------- Outfit CRUD ----------
-  function openCreateOutfit() {
-    setOutfitForm(EMPTY_NESTED)
-    setOutfitDialog({ mode: 'create' })
-  }
-
-  function openEditOutfit(row: CharacterOutfit) {
-    setOutfitForm({ label: row.label, prompt_desc: row.prompt_desc })
-    setOutfitDialog({ mode: 'edit', row })
-  }
-
   async function submitOutfit(e: React.FormEvent) {
     e.preventDefault()
-    if (!selected) return
+    if (!activeChar) return
     if (!outfitForm.label.trim()) {
       toast.error('Label outfit wajib diisi')
       return
     }
     setSubmitting(true)
-    const payload = {
-      character_id: selected.id,
-      label: outfitForm.label.trim(),
-      prompt_desc: outfitForm.prompt_desc.trim(),
+    const { data, error } = await supabase
+      .from('character_outfits')
+      .insert({
+        character_id: activeChar.id,
+        label: outfitForm.label.trim(),
+        prompt_desc: outfitForm.prompt_desc.trim(),
+      })
+      .select()
+      .single()
+    setSubmitting(false)
+    if (error) {
+      toast.error('Gagal menambah outfit', { description: error.message })
+      return
     }
-    if (outfitDialog?.mode === 'create') {
-      const { data, error } = await supabase
-        .from('character_outfits')
-        .insert(payload)
-        .select()
-        .single()
-      setSubmitting(false)
-      if (error) {
-        toast.error('Gagal membuat outfit', { description: error.message })
-        return
-      }
-      setOutfits((prev) => [...prev, data as CharacterOutfit])
-      toast.success('Outfit ditambahkan')
-    } else if (outfitDialog?.mode === 'edit') {
-      const { data, error } = await supabase
-        .from('character_outfits')
-        .update(payload)
-        .eq('id', outfitDialog.row.id)
-        .select()
-        .single()
-      setSubmitting(false)
-      if (error) {
-        toast.error('Gagal update outfit', { description: error.message })
-        return
-      }
-      const updated = data as CharacterOutfit
-      setOutfits((prev) => prev.map((o) => (o.id === updated.id ? updated : o)))
-      toast.success('Outfit diperbarui')
-    }
-    setOutfitDialog(null)
+    setOutfits((prev) => [...prev, data as CharacterOutfit])
+    setOutfitForm(EMPTY_NESTED)
+    toast.success('Outfit ditambahkan')
   }
 
   // ---------- Expression CRUD ----------
-  function openCreateExpr() {
-    setExprForm(EMPTY_NESTED)
-    setExprDialog({ mode: 'create' })
-  }
-
-  function openEditExpr(row: CharacterExpression) {
-    setExprForm({ label: row.label, prompt_desc: row.prompt_desc })
-    setExprDialog({ mode: 'edit', row })
-  }
-
   async function submitExpression(e: React.FormEvent) {
     e.preventDefault()
-    if (!selected) return
+    if (!activeChar) return
     if (!exprForm.label.trim()) {
       toast.error('Label expression wajib diisi')
       return
     }
     setSubmitting(true)
-    const payload = {
-      character_id: selected.id,
-      label: exprForm.label.trim(),
-      prompt_desc: exprForm.prompt_desc.trim(),
+    const { data, error } = await supabase
+      .from('character_expressions')
+      .insert({
+        character_id: activeChar.id,
+        label: exprForm.label.trim(),
+        prompt_desc: exprForm.prompt_desc.trim(),
+      })
+      .select()
+      .single()
+    setSubmitting(false)
+    if (error) {
+      toast.error('Gagal menambah expression', { description: error.message })
+      return
     }
-    if (exprDialog?.mode === 'create') {
-      const { data, error } = await supabase
-        .from('character_expressions')
-        .insert(payload)
-        .select()
-        .single()
-      setSubmitting(false)
-      if (error) {
-        toast.error('Gagal membuat expression', { description: error.message })
-        return
-      }
-      setExpressions((prev) => [...prev, data as CharacterExpression])
-      toast.success('Expression ditambahkan')
-    } else if (exprDialog?.mode === 'edit') {
-      const { data, error } = await supabase
-        .from('character_expressions')
-        .update(payload)
-        .eq('id', exprDialog.row.id)
-        .select()
-        .single()
-      setSubmitting(false)
-      if (error) {
-        toast.error('Gagal update expression', { description: error.message })
-        return
-      }
-      const updated = data as CharacterExpression
-      setExpressions((prev) =>
-        prev.map((e2) => (e2.id === updated.id ? updated : e2)),
-      )
-      toast.success('Expression diperbarui')
-    }
-    setExprDialog(null)
+    setExpressions((prev) => [...prev, data as CharacterExpression])
+    setExprForm(EMPTY_NESTED)
+    toast.success('Expression ditambahkan')
   }
 
-  // ---------- Delete handlers ----------
+  // ---------- Delete ----------
   async function confirmDelete() {
     if (!pendingDelete) return
     const target = pendingDelete
@@ -351,9 +320,13 @@ export function CharacterMatrix() {
         return
       }
       setCharacters((prev) => prev.filter((c) => c.id !== target.row.id))
-      if (selectedId === target.row.id) {
-        const next = characters.find((c) => c.id !== target.row.id)
-        setSelectedId(next ? next.id : null)
+      // If the active sheet was for this character, close it.
+      if (
+        (sheetState?.mode === 'edit' && sheetState.row.id === target.row.id) ||
+        (sheetState?.mode === 'create' &&
+          sheetState.saved?.id === target.row.id)
+      ) {
+        closeSheet()
       }
       toast.success('Character dihapus')
     } else if (target.kind === 'outfit') {
@@ -387,40 +360,37 @@ export function CharacterMatrix() {
         title="Character Matrix"
         description="Definisikan aktor (DNA tubuh & wajah), lalu lampirkan outfit dan expression."
         actions={
-          <Button onClick={openCreateChar} disabled={!isSupabaseConfigured}>
+          <Button onClick={openCreate} disabled={!isSupabaseConfigured}>
             <Plus className="h-4 w-4" />
             New Character
           </Button>
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-[260px_1fr]">
-        {/* Left: character list */}
-        <div className="space-y-2">
-          {loading ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Memuat…
-            </p>
-          ) : characters.length === 0 ? (
-            <div className="rounded-lg border border-dashed bg-card/40 px-4 py-8 text-center">
-              <UserCircle2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                Belum ada character.
-              </p>
-            </div>
-          ) : (
-            characters.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setSelectedId(c.id)}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-md border bg-card px-3 py-2 text-left transition-colors hover:border-primary/40',
-                  selectedId === c.id &&
-                    'border-primary/60 bg-primary/10 text-foreground',
-                )}
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary">
+      {loading ? (
+        <p className="rounded-lg border bg-card p-12 text-center text-sm text-muted-foreground">
+          Memuat…
+        </p>
+      ) : characters.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-card/40 p-12 text-center">
+          <UserCircle2 className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Belum ada character.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Klik <strong className="font-semibold">New Character</strong> untuk
+            membuat actor pertama.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {characters.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => openEdit(c)}
+              className="group rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary">
                   {c.avatar_url ? (
                     <img
                       src={c.avatar_url}
@@ -428,183 +398,355 @@ export function CharacterMatrix() {
                       className="h-full w-full object-cover"
                     />
                   ) : (
-                    <UserCircle2 className="h-5 w-5 text-muted-foreground" />
+                    <UserCircle2 className="h-6 w-6 text-muted-foreground" />
                   )}
                 </div>
-                <span className="truncate text-sm font-medium">{c.name}</span>
-              </button>
-            ))
-          )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{c.name}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {c.body_dna || (
+                      <span className="italic">no body DNA</span>
+                    )}
+                  </p>
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPendingDelete({ kind: 'character', row: c })
+                  }}
+                  aria-label="Delete"
+                  className="opacity-0 group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </div>
+            </button>
+          ))}
         </div>
+      )}
 
-        {/* Right: detail */}
-        <div className="min-w-0 space-y-6">
-          {!selected ? (
-            <div className="rounded-lg border border-dashed bg-card/40 p-12 text-center text-sm text-muted-foreground">
-              Pilih character di kiri untuk mengelola outfit & expression.
-            </div>
-          ) : (
-            <>
-              <CharacterDetail
-                character={selected}
-                onEdit={() => openEditChar(selected)}
-                onDelete={() =>
-                  setPendingDelete({ kind: 'character', row: selected })
-                }
-              />
-
-              <NestedSection
-                title="Outfits"
-                icon={<Shirt className="h-4 w-4" />}
-                emptyText="Belum ada outfit. Tambah satu untuk dipakai di scene."
-                loading={loadingNested}
-                items={outfits.map((o) => ({
-                  id: o.id,
-                  label: o.label,
-                  prompt: o.prompt_desc,
-                  raw: o,
-                }))}
-                onAdd={openCreateOutfit}
-                onEdit={(it) => openEditOutfit(it.raw as CharacterOutfit)}
-                onDelete={(it) =>
-                  setPendingDelete({
-                    kind: 'outfit',
-                    row: it.raw as CharacterOutfit,
-                  })
-                }
-              />
-
-              <NestedSection
-                title="Expressions"
-                icon={<Smile className="h-4 w-4" />}
-                emptyText="Belum ada expression. Buat ekspresi seperti happy / serious / shocked."
-                loading={loadingNested}
-                items={expressions.map((e) => ({
-                  id: e.id,
-                  label: e.label,
-                  prompt: e.prompt_desc,
-                  raw: e,
-                }))}
-                onAdd={openCreateExpr}
-                onEdit={(it) =>
-                  openEditExpr(it.raw as CharacterExpression)
-                }
-                onDelete={(it) =>
-                  setPendingDelete({
-                    kind: 'expression',
-                    row: it.raw as CharacterExpression,
-                  })
-                }
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Character dialog */}
-      <Dialog
-        open={charDialog !== null}
-        onOpenChange={(o) => !o && setCharDialog(null)}
+      {/* Character sheet */}
+      <Sheet
+        open={sheetState !== null}
+        onOpenChange={(o) => !o && closeSheet()}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {charDialog?.mode === 'edit' ? 'Edit Character' : 'New Character'}
-            </DialogTitle>
-            <DialogDescription>
-              Body DNA dan face features digunakan oleh prompt constructor di
-              PRD 3.
-            </DialogDescription>
-          </DialogHeader>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>
+              {sheetState?.mode === 'edit'
+                ? `Edit ${sheetState.row.name}`
+                : sheetState?.mode === 'create' && sheetState.saved
+                  ? `Edit ${sheetState.saved.name}`
+                  : 'New Character'}
+            </SheetTitle>
+            <SheetDescription>
+              {activeChar
+                ? 'Atur Bio & DNA, kemudian lampirkan wardrobe dan expression.'
+                : 'Simpan Bio & DNA dulu untuk membuka tab Wardrobe & Expressions.'}
+            </SheetDescription>
+          </SheetHeader>
 
-          <form onSubmit={submitCharacter} className="grid gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="char-name">Name</Label>
-              <Input
-                id="char-name"
-                value={charForm.name}
-                onChange={(e) =>
-                  setCharForm((f) => ({ ...f, name: e.target.value }))
-                }
-                placeholder="e.g. Rara, the Cyber-Diver"
-                required
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="char-body">Body DNA</Label>
-              <Textarea
-                id="char-body"
-                rows={3}
-                value={charForm.body_dna}
-                onChange={(e) =>
-                  setCharForm((f) => ({ ...f, body_dna: e.target.value }))
-                }
-                placeholder="petite Asian woman, athletic build, 168cm…"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="char-face">Face features</Label>
-              <Textarea
-                id="char-face"
-                rows={3}
-                value={charForm.face_features}
-                onChange={(e) =>
-                  setCharForm((f) => ({ ...f, face_features: e.target.value }))
-                }
-                placeholder="sharp jawline, freckles, neon-green eyes…"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="char-avatar">Avatar URL (optional)</Label>
-              <Input
-                id="char-avatar"
-                type="url"
-                value={charForm.avatar_url}
-                onChange={(e) =>
-                  setCharForm((f) => ({ ...f, avatar_url: e.target.value }))
-                }
-                placeholder="https://…"
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setCharDialog(null)}
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) =>
+              setActiveTab(v as 'bio' | 'wardrobe' | 'expressions')
+            }
+            className="flex min-h-0 flex-1 flex-col px-6 py-4"
+          >
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="bio" className="gap-1.5">
+                <IdCard className="h-3.5 w-3.5" />
+                Bio &amp; DNA
+              </TabsTrigger>
+              <TabsTrigger
+                value="wardrobe"
+                className="gap-1.5"
+                disabled={activeChar === null}
               >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Menyimpan…' : 'Simpan'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+                <Shirt className="h-3.5 w-3.5" />
+                Wardrobe
+              </TabsTrigger>
+              <TabsTrigger
+                value="expressions"
+                className="gap-1.5"
+                disabled={activeChar === null}
+              >
+                <Smile className="h-3.5 w-3.5" />
+                Expressions
+              </TabsTrigger>
+            </TabsList>
 
-      {/* Outfit dialog */}
-      <NestedDialog
-        open={outfitDialog !== null}
-        mode={outfitDialog?.mode ?? 'create'}
-        title="Outfit"
-        form={outfitForm}
-        setForm={setOutfitForm}
-        onClose={() => setOutfitDialog(null)}
-        onSubmit={submitOutfit}
-        submitting={submitting}
-      />
+            {/* Tab 1: Bio & DNA */}
+            <TabsContent
+              value="bio"
+              className="flex-1 overflow-y-auto pr-1"
+            >
+              <form onSubmit={submitCharacter} className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="char-name">Name</Label>
+                  <Input
+                    id="char-name"
+                    value={charForm.name}
+                    onChange={(e) =>
+                      setCharForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                    placeholder="e.g. Rara, the Cyber-Diver"
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="char-body">Body DNA</Label>
+                  <Textarea
+                    id="char-body"
+                    rows={3}
+                    value={charForm.body_dna}
+                    onChange={(e) =>
+                      setCharForm((f) => ({ ...f, body_dna: e.target.value }))
+                    }
+                    placeholder="petite Asian woman, athletic build, 168cm…"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="char-face">Face features</Label>
+                  <Textarea
+                    id="char-face"
+                    rows={3}
+                    value={charForm.face_features}
+                    onChange={(e) =>
+                      setCharForm((f) => ({
+                        ...f,
+                        face_features: e.target.value,
+                      }))
+                    }
+                    placeholder="sharp jawline, freckles, neon-green eyes…"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="char-avatar">Avatar URL (optional)</Label>
+                  <Input
+                    id="char-avatar"
+                    type="url"
+                    value={charForm.avatar_url}
+                    onChange={(e) =>
+                      setCharForm((f) => ({
+                        ...f,
+                        avatar_url: e.target.value,
+                      }))
+                    }
+                    placeholder="https://…"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeSheet}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={submitting}>
+                    {submitting ? 'Menyimpan…' : 'Save Character'}
+                  </Button>
+                </div>
+              </form>
+            </TabsContent>
 
-      {/* Expression dialog */}
-      <NestedDialog
-        open={exprDialog !== null}
-        mode={exprDialog?.mode ?? 'create'}
-        title="Expression"
-        form={exprForm}
-        setForm={setExprForm}
-        onClose={() => setExprDialog(null)}
-        onSubmit={submitExpression}
-        submitting={submitting}
-      />
+            {/* Tab 2: Wardrobe */}
+            <TabsContent
+              value="wardrobe"
+              className="flex-1 overflow-y-auto pr-1"
+            >
+              {!activeChar ? (
+                <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Simpan character dulu untuk menambah outfit.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  <form onSubmit={submitOutfit} className="grid gap-3 rounded-lg border bg-card p-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="outfit-label">Label</Label>
+                      <Input
+                        id="outfit-label"
+                        value={outfitForm.label}
+                        onChange={(e) =>
+                          setOutfitForm((f) => ({
+                            ...f,
+                            label: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. Office Suit"
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="outfit-prompt">
+                        Prompt description
+                      </Label>
+                      <Textarea
+                        id="outfit-prompt"
+                        rows={2}
+                        value={outfitForm.prompt_desc}
+                        onChange={(e) =>
+                          setOutfitForm((f) => ({
+                            ...f,
+                            prompt_desc: e.target.value,
+                          }))
+                        }
+                        placeholder="wearing black tuxedo, red tie"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="justify-self-end"
+                      disabled={submitting}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add outfit
+                    </Button>
+                  </form>
+
+                  {loadingNested ? (
+                    <p className="text-sm text-muted-foreground">Memuat…</p>
+                  ) : outfits.length === 0 ? (
+                    <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                      Belum ada outfit untuk character ini.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {outfits.map((o) => (
+                        <li
+                          key={o.id}
+                          className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{o.label}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {o.prompt_desc || (
+                                <span className="italic">no description</span>
+                              )}
+                            </p>
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() =>
+                              setPendingDelete({ kind: 'outfit', row: o })
+                            }
+                            aria-label="Delete outfit"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Tab 3: Expressions */}
+            <TabsContent
+              value="expressions"
+              className="flex-1 overflow-y-auto pr-1"
+            >
+              {!activeChar ? (
+                <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Simpan character dulu untuk menambah expression.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  <form
+                    onSubmit={submitExpression}
+                    className="grid gap-3 rounded-lg border bg-card p-4"
+                  >
+                    <div className="grid gap-2">
+                      <Label htmlFor="expr-label">Label</Label>
+                      <Input
+                        id="expr-label"
+                        value={exprForm.label}
+                        onChange={(e) =>
+                          setExprForm((f) => ({
+                            ...f,
+                            label: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. Furious"
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="expr-prompt">Prompt description</Label>
+                      <Textarea
+                        id="expr-prompt"
+                        rows={2}
+                        value={exprForm.prompt_desc}
+                        onChange={(e) =>
+                          setExprForm((f) => ({
+                            ...f,
+                            prompt_desc: e.target.value,
+                          }))
+                        }
+                        placeholder="furrowed eyebrows, screaming"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="justify-self-end"
+                      disabled={submitting}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add expression
+                    </Button>
+                  </form>
+
+                  {loadingNested ? (
+                    <p className="text-sm text-muted-foreground">Memuat…</p>
+                  ) : expressions.length === 0 ? (
+                    <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                      Belum ada expression untuk character ini.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {expressions.map((ex) => (
+                        <li
+                          key={ex.id}
+                          className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{ex.label}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {ex.prompt_desc || (
+                                <span className="italic">no description</span>
+                              )}
+                            </p>
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() =>
+                              setPendingDelete({
+                                kind: 'expression',
+                                row: ex,
+                              })
+                            }
+                            aria-label="Delete expression"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </SheetContent>
+      </Sheet>
 
       {/* Confirm delete */}
       <AlertDialog
@@ -635,224 +777,5 @@ export function CharacterMatrix() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-// ---------- Sub-components ----------
-
-function CharacterDetail({
-  character,
-  onEdit,
-  onDelete,
-}: {
-  character: Character
-  onEdit: () => void
-  onDelete: () => void
-}) {
-  return (
-    <div className="rounded-lg border bg-card p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary">
-            {character.avatar_url ? (
-              <img
-                src={character.avatar_url}
-                alt={character.name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <UserCircle2 className="h-7 w-7 text-muted-foreground" />
-            )}
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold">{character.name}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {character.body_dna || (
-                <span className="italic">Belum ada body DNA.</span>
-              )}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {character.face_features || (
-                <span className="italic">Belum ada face features.</span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-1">
-          <Button size="icon" variant="ghost" onClick={onEdit} aria-label="Edit">
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onDelete}
-            aria-label="Delete"
-          >
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface NestedItem {
-  id: string
-  label: string
-  prompt: string
-  raw: CharacterOutfit | CharacterExpression
-}
-
-function NestedSection({
-  title,
-  icon,
-  emptyText,
-  items,
-  loading,
-  onAdd,
-  onEdit,
-  onDelete,
-}: {
-  title: string
-  icon: React.ReactNode
-  emptyText: string
-  items: NestedItem[]
-  loading: boolean
-  onAdd: () => void
-  onEdit: (item: NestedItem) => void
-  onDelete: (item: NestedItem) => void
-}) {
-  return (
-    <section className="rounded-lg border bg-card">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          {icon}
-          {title}
-          <span className="text-xs font-normal text-muted-foreground">
-            · {items.length}
-          </span>
-        </div>
-        <Button size="sm" variant="outline" onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5" />
-          Add
-        </Button>
-      </header>
-
-      <div className="divide-y divide-border">
-        {loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Memuat…</p>
-        ) : items.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">{emptyText}</p>
-        ) : (
-          items.map((it) => (
-            <div
-              key={it.id}
-              className="flex items-start justify-between gap-4 p-4"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{it.label}</p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {it.prompt || (
-                    <span className="italic">no prompt description</span>
-                  )}
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => onEdit(it)}
-                  aria-label="Edit"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => onDelete(it)}
-                  aria-label="Delete"
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  )
-}
-
-function NestedDialog({
-  open,
-  mode,
-  title,
-  form,
-  setForm,
-  onClose,
-  onSubmit,
-  submitting,
-}: {
-  open: boolean
-  mode: 'create' | 'edit'
-  title: string
-  form: NestedForm
-  setForm: React.Dispatch<React.SetStateAction<NestedForm>>
-  onClose: () => void
-  onSubmit: (e: React.FormEvent) => void
-  submitting: boolean
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'edit' ? `Edit ${title}` : `New ${title}`}
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={onSubmit} className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor={`${title}-label`}>Label</Label>
-            <Input
-              id={`${title}-label`}
-              value={form.label}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, label: e.target.value }))
-              }
-              placeholder={
-                title === 'Outfit'
-                  ? 'e.g. Cyber-Diver Suit'
-                  : 'e.g. Determined'
-              }
-              required
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor={`${title}-prompt`}>Prompt description</Label>
-            <Textarea
-              id={`${title}-prompt`}
-              rows={3}
-              value={form.prompt_desc}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, prompt_desc: e.target.value }))
-              }
-              placeholder={
-                title === 'Outfit'
-                  ? 'sleek black neoprene suit with neon green accents…'
-                  : 'jaw clenched, eyes narrowed with focus…'
-              }
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Menyimpan…' : 'Simpan'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }
