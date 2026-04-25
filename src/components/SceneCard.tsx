@@ -45,12 +45,19 @@ interface SceneCardProps {
   scene: Scene
   characters: Character[]
   presets: GroupedPresets
-  /** scene_order to use when inserting a duplicate. Computed by the parent
-   * from the current scenes list to avoid colliding with existing rows. */
-  nextSceneOrder: number
+  /** Synchronously reserve and return the next `scene_order` for an insert.
+   *
+   * Implemented by the parent on top of a ref-based counter so that two
+   * concurrent Duplicate / Add clicks always get distinct, monotonically
+   * increasing values — a stale snapshot prop would let both inserts use
+   * the same value and corrupt the row ordering. */
+  reserveSceneOrder: () => number
   onUpdate: (updated: Scene) => void
   onDelete: (sceneId: string) => void
   onDuplicate: (newScene: Scene) => void
+  /** When true, all interactive controls are disabled (e.g. during a batch
+   * generation run). */
+  locked?: boolean
 }
 
 function valueOrNone(id: string | null | undefined): string {
@@ -65,10 +72,11 @@ export function SceneCard({
   scene,
   characters,
   presets,
-  nextSceneOrder,
+  reserveSceneOrder,
   onUpdate,
   onDelete,
   onDuplicate,
+  locked = false,
 }: SceneCardProps) {
   const [characterId, setCharacterId] = useState<string | null>(
     scene.character_id ?? null,
@@ -263,7 +271,7 @@ export function SceneCard({
         project_id: scene.project_id,
         // Always append at the end to avoid colliding with existing scene_order
         // values. (PRD 3 hinted at "order + 1" but that creates duplicates.)
-        scene_order: nextSceneOrder,
+        scene_order: reserveSceneOrder(),
         action_text: actionText,
         character_id: characterId,
         outfit_id: outfitId,
@@ -301,7 +309,7 @@ export function SceneCard({
 
   // ---------- Render ----------
 
-  const disabled = !isSupabaseConfigured
+  const disabled = !isSupabaseConfigured || locked
 
   return (
     <Card className="flex flex-col">
