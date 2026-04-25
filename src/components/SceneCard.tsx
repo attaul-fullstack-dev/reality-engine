@@ -45,6 +45,9 @@ interface SceneCardProps {
   scene: Scene
   characters: Character[]
   presets: GroupedPresets
+  /** scene_order to use when inserting a duplicate. Computed by the parent
+   * from the current scenes list to avoid colliding with existing rows. */
+  nextSceneOrder: number
   onUpdate: (updated: Scene) => void
   onDelete: (sceneId: string) => void
   onDuplicate: (newScene: Scene) => void
@@ -62,6 +65,7 @@ export function SceneCard({
   scene,
   characters,
   presets,
+  nextSceneOrder,
   onUpdate,
   onDelete,
   onDuplicate,
@@ -257,7 +261,9 @@ export function SceneCard({
       .from('scenes')
       .insert({
         project_id: scene.project_id,
-        scene_order: scene.scene_order + 1,
+        // Always append at the end to avoid colliding with existing scene_order
+        // values. (PRD 3 hinted at "order + 1" but that creates duplicates.)
+        scene_order: nextSceneOrder,
         action_text: actionText,
         character_id: characterId,
         outfit_id: outfitId,

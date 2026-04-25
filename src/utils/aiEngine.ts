@@ -157,19 +157,26 @@ interface PromptParts {
  * following the formula in PRD 3 §Phase 8 / Row 5.
  */
 export function buildFinalPrompt(parts: PromptParts): string {
-  return [
+  const subject = [
     parts.bodyDna,
     parts.faceFeatures,
     parts.outfitDesc ? `wearing ${parts.outfitDesc}` : '',
     parts.expressionDesc ? `${parts.expressionDesc} expression` : '',
     `ACTION: ${parts.actionText}`,
-    'TECHNICAL SPECS:',
-    parts.cameraMod ?? '',
-    parts.lightingMod ?? '',
-    parts.filmStockMod ?? '',
-    parts.styleMod ?? '',
   ]
     .map((s) => s.trim())
     .filter(Boolean)
     .join('. ')
+
+  const technicalMods = [
+    parts.cameraMod,
+    parts.lightingMod,
+    parts.filmStockMod,
+    parts.styleMod,
+  ]
+    .map((s) => (s ?? '').trim())
+    .filter(Boolean)
+
+  if (technicalMods.length === 0) return subject
+  return `${subject}. TECHNICAL SPECS: ${technicalMods.join(', ')}`
 }

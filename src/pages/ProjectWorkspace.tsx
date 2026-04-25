@@ -205,6 +205,7 @@ export function ProjectWorkspace() {
                   scene={s}
                   characters={characters}
                   presets={presets}
+                  nextSceneOrder={nextSceneOrder}
                   onUpdate={handleSceneUpdate}
                   onDelete={handleSceneDelete}
                   onDuplicate={handleSceneDuplicate}
