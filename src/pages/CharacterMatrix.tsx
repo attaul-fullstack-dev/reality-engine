@@ -210,9 +210,13 @@ export function CharacterMatrix() {
           prev.map((c) => (c.id === updated.id ? updated : c)),
         )
         // Functional updater: only re-sync sheet state if the user hasn't
-        // closed the sheet during the in-flight Supabase call.
+        // closed the sheet or navigated to a different character during the
+        // in-flight Supabase call. Verify identity (mode + saved id) so a
+        // stale response can't overwrite an unrelated open sheet.
         setSheetState((prev) =>
-          prev !== null ? { mode: 'create', saved: updated } : null,
+          prev?.mode === 'create' && prev.saved?.id === target.id
+            ? { mode: 'create', saved: updated }
+            : prev,
         )
         toast.success('Character diperbarui')
       } else {
@@ -228,16 +232,22 @@ export function CharacterMatrix() {
         }
         const created = data as Character
         setCharacters((prev) => [...prev, created])
+        // Only attach the inserted row to the sheet if it is still in the
+        // initial create state (mode=create, saved=null). Any other state
+        // means the user navigated away mid-flight.
         setSheetState((prev) =>
-          prev !== null ? { mode: 'create', saved: created } : null,
+          prev?.mode === 'create' && prev.saved === null
+            ? { mode: 'create', saved: created }
+            : prev,
         )
         toast.success('Character dibuat. Tab Wardrobe & Expressions aktif.')
       }
     } else if (sheetState?.mode === 'edit') {
+      const targetId = sheetState.row.id
       const { data, error } = await supabase
         .from('characters')
         .update(payload)
-        .eq('id', sheetState.row.id)
+        .eq('id', targetId)
         .select()
         .single()
       setSubmitting(false)
@@ -249,8 +259,11 @@ export function CharacterMatrix() {
       setCharacters((prev) =>
         prev.map((c) => (c.id === updated.id ? updated : c)),
       )
+      // Only re-sync if we're still editing the same row.
       setSheetState((prev) =>
-        prev !== null ? { mode: 'edit', row: updated } : null,
+        prev?.mode === 'edit' && prev.row.id === targetId
+          ? { mode: 'edit', row: updated }
+          : prev,
       )
       toast.success('Character diperbarui')
     }
