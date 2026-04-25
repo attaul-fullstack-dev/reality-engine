@@ -72,7 +72,16 @@ function parseSceneArray(raw: string): string[] {
       'Gagal parse array scene dari respon Gemini.',
     )
   }
-  const parsed = JSON.parse(match[0])
+  // Wrap in try/catch so a malformed extracted array surfaces as a
+  // ScriptWizardError instead of a raw SyntaxError.
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(match[0])
+  } catch {
+    throw new ScriptWizardError(
+      'Gagal parse array scene dari respon Gemini.',
+    )
+  }
   if (!Array.isArray(parsed) || !parsed.every((s) => typeof s === 'string')) {
     throw new ScriptWizardError(
       'Format respon Gemini bukan array of strings.',
