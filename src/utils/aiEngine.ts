@@ -16,6 +16,13 @@
  */
 
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
+import type {
+  Character,
+  CharacterExpression,
+  CharacterOutfit,
+  Preset,
+  Scene,
+} from '@/types'
 
 // ----- Error classes -----
 
@@ -37,6 +44,22 @@ export class GenerationFailedError extends Error {
   constructor(reason: string) {
     super(`Image generation failed: ${reason}`)
     this.name = 'GenerationFailedError'
+  }
+}
+
+/**
+ * Errors thrown by the provider call carry a numeric HTTP status so the
+ * rotation engine can decide whether to retry. The mock never throws this,
+ * but a real `callImageProvider` should wrap fetch errors in this class.
+ */
+export class ProviderError extends Error {
+  status: number
+  provider: string
+  constructor(provider: string, status: number, message: string) {
+    super(message)
+    this.name = 'ProviderError'
+    this.provider = provider
+    this.status = status
   }
 }
 
@@ -104,13 +127,12 @@ export async function generateImageWithRotation(
     try {
       return await callImageProvider(key, finalPrompt)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      const status = Number(message.match(/\d{3}/)?.[0] ?? 0)
-
-      if (status === 429 || status === 503) {
-        // Rate limit / service unavailable — bump error_count and rotate.
+      // Inspect a structured ProviderError instead of regex-parsing the
+      // message — that mistakes incidental 3-digit numbers (IPs, request
+      // ids) for HTTP statuses.
+      if (err instanceof ProviderError && (err.status === 429 || err.status === 503)) {
         await bumpErrorCount(key)
-        lastError = new RateLimitError(key.provider, status)
+        lastError = new RateLimitError(err.provider, err.status)
         continue
       }
 
@@ -179,4 +201,56 @@ export function buildFinalPrompt(parts: PromptParts): string {
 
   if (technicalMods.length === 0) return subject
   return `${subject}. TECHNICAL SPECS: ${technicalMods.join(', ')}`
+}
+
+// ----- Scene-level helper -----
+
+/**
+ * Lookup tables passed by the workspace so we can resolve a Scene's FK
+ * columns to actual rows when batching prompt construction.
+ */
+export interface SceneLookup {
+  characters: Character[]
+  outfits: CharacterOutfit[]
+  expressions: CharacterExpression[]
+  presets: Preset[]
+}
+
+/**
+ * Build the final prompt for a Scene using the pre-loaded lookup tables.
+ * Returns null when the scene is missing its anchor (no character or no
+ * action_text) and therefore can't be sent to the model.
+ */
+export function buildPromptFromScene(
+  scene: Scene,
+  lookup: SceneLookup,
+): string | null {
+  if (!scene.character_id || !scene.action_text?.trim()) return null
+  const character = lookup.characters.find((c) => c.id === scene.character_id)
+  if (!character) return null
+
+  const outfit = scene.outfit_id
+    ? lookup.outfits.find((o) => o.id === scene.outfit_id) ?? null
+    : null
+  const expression = scene.expression_id
+    ? lookup.expressions.find((e) => e.id === scene.expression_id) ?? null
+    : null
+  const findPreset = (id: string | null | undefined) =>
+    id ? lookup.presets.find((p) => p.id === id) ?? null : null
+  const camera = findPreset(scene.camera_id)
+  const lighting = findPreset(scene.lighting_id)
+  const filmStock = findPreset(scene.film_stock_id)
+  const style = findPreset(scene.style_id)
+
+  return buildFinalPrompt({
+    bodyDna: character.body_dna,
+    faceFeatures: character.face_features,
+    outfitDesc: outfit?.prompt_desc ?? null,
+    expressionDesc: expression?.prompt_desc ?? null,
+    actionText: scene.action_text.trim(),
+    cameraMod: camera?.modifier ?? null,
+    lightingMod: lighting?.modifier ?? null,
+    filmStockMod: filmStock?.modifier ?? null,
+    styleMod: style?.modifier ?? null,
+  })
 }
