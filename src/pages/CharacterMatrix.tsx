@@ -162,6 +162,12 @@ export function CharacterMatrix() {
       face_features: row.face_features,
       avatar_url: row.avatar_url ?? '',
     })
+    // Clear nested lists synchronously so a previously-opened character's
+    // outfits/expressions can't bleed into the new sheet (especially if
+    // fetchNested errors before populating, in which case the lists would
+    // otherwise stay populated with the prior character's rows).
+    setOutfits([])
+    setExpressions([])
     setOutfitForm(EMPTY_NESTED)
     setExprForm(EMPTY_NESTED)
     setActiveTab('bio')
