@@ -209,7 +209,11 @@ export function CharacterMatrix() {
         setCharacters((prev) =>
           prev.map((c) => (c.id === updated.id ? updated : c)),
         )
-        setSheetState({ mode: 'create', saved: updated })
+        // Functional updater: only re-sync sheet state if the user hasn't
+        // closed the sheet during the in-flight Supabase call.
+        setSheetState((prev) =>
+          prev !== null ? { mode: 'create', saved: updated } : null,
+        )
         toast.success('Character diperbarui')
       } else {
         const { data, error } = await supabase
@@ -224,7 +228,9 @@ export function CharacterMatrix() {
         }
         const created = data as Character
         setCharacters((prev) => [...prev, created])
-        setSheetState({ mode: 'create', saved: created })
+        setSheetState((prev) =>
+          prev !== null ? { mode: 'create', saved: created } : null,
+        )
         toast.success('Character dibuat. Tab Wardrobe & Expressions aktif.')
       }
     } else if (sheetState?.mode === 'edit') {
@@ -243,7 +249,9 @@ export function CharacterMatrix() {
       setCharacters((prev) =>
         prev.map((c) => (c.id === updated.id ? updated : c)),
       )
-      setSheetState({ mode: 'edit', row: updated })
+      setSheetState((prev) =>
+        prev !== null ? { mode: 'edit', row: updated } : null,
+      )
       toast.success('Character diperbarui')
     }
   }
@@ -383,11 +391,18 @@ export function CharacterMatrix() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {characters.map((c) => (
-            <button
+            <div
               key={c.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => openEdit(c)}
-              className="group rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openEdit(c)
+                }
+              }}
+              className="group cursor-pointer rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             >
               <div className="flex items-start gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary">
@@ -422,7 +437,7 @@ export function CharacterMatrix() {
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
