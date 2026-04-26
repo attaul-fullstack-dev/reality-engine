@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const CATEGORY_META: Record<
   PresetCategory,
@@ -187,10 +188,6 @@ export function PresetEngine() {
     toast.success('Preset dihapus')
   }
 
-  const filtered = presets.filter((p) => p.category === activeTab)
-  const meta = CATEGORY_META[activeTab]
-  const ActiveIcon = meta.icon
-
   return (
     <div>
       <PageHeader
@@ -198,108 +195,105 @@ export function PresetEngine() {
         description="Empat kategori preset (Camera, Lighting, FilmStock, Style) dipakai oleh prompt constructor."
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as PresetCategory)}
+      >
+        <TabsList className="grid w-full grid-cols-2 md:w-auto md:grid-cols-4">
+          {PRESET_CATEGORIES.map((cat) => {
+            const Icon = CATEGORY_META[cat].icon
+            const count = presets.filter((p) => p.category === cat).length
+            return (
+              <TabsTrigger key={cat} value={cat} className="gap-2">
+                <Icon className="h-3.5 w-3.5" />
+                <span>{cat}</span>
+                <span className="text-xs text-muted-foreground">({count})</span>
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
+
         {PRESET_CATEGORIES.map((cat) => {
-          const Icon = CATEGORY_META[cat].icon
-          const count = presets.filter((p) => p.category === cat).length
-          const active = cat === activeTab
+          const meta = CATEGORY_META[cat]
+          const Icon = meta.icon
+          const filtered = presets.filter((p) => p.category === cat)
           return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setActiveTab(cat)}
-              className={
-                'flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ' +
-                (active
-                  ? 'border-primary/50 bg-primary/10 text-foreground'
-                  : 'bg-card hover:border-primary/30')
-              }
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary">
-                <Icon className="h-4 w-4" />
+            <TabsContent key={cat} value={cat} className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/15 text-primary">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{cat} presets</p>
+                    <p className="text-xs text-muted-foreground">
+                      {meta.description}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => openCreate(cat)}
+                  disabled={!isSupabaseConfigured}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add preset
+                </Button>
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{cat}</p>
-                <p className="text-xs text-muted-foreground">{count} preset</p>
-              </div>
-            </button>
+
+              {loading ? (
+                <p className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
+                  Memuat…
+                </p>
+              ) : filtered.length === 0 ? (
+                <div className="rounded-lg border border-dashed bg-card/40 p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Belum ada preset {cat}. Contoh modifier:
+                  </p>
+                  <code className="mt-2 inline-block rounded bg-secondary px-2 py-1 font-mono text-xs">
+                    {meta.sample}
+                  </code>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {filtered.map((p) => (
+                    <Card key={p.id} className="flex flex-col">
+                      <CardHeader>
+                        <CardTitle className="text-base">{p.label}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex-1">
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {p.modifier || (
+                            <span className="italic">no modifier</span>
+                          )}
+                        </p>
+                      </CardContent>
+                      <CardFooter className="justify-end gap-1 pt-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => openEdit(p)}
+                          aria-label="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setPendingDelete(p)}
+                          aria-label="Delete"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
           )
         })}
-      </div>
-
-      <div className="rounded-lg border bg-card">
-        <header className="flex items-center justify-between border-b border-border px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/15 text-primary">
-              <ActiveIcon className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">{activeTab} presets</p>
-              <p className="text-xs text-muted-foreground">{meta.description}</p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => openCreate(activeTab)}
-            disabled={!isSupabaseConfigured}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add preset
-          </Button>
-        </header>
-
-        <div className="divide-y divide-border">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">Memuat…</p>
-          ) : filtered.length === 0 ? (
-            <div className="p-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                Belum ada preset {activeTab}. Contoh modifier:
-              </p>
-              <code className="mt-2 inline-block rounded bg-secondary px-2 py-1 font-mono text-xs">
-                {meta.sample}
-              </code>
-            </div>
-          ) : (
-            filtered.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-start justify-between gap-4 px-5 py-4"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{p.label}</p>
-                    <Badge variant="secondary">{p.category}</Badge>
-                  </div>
-                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                    {p.modifier || (
-                      <span className="italic">no modifier</span>
-                    )}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => openEdit(p)}
-                    aria-label="Edit"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => setPendingDelete(p)}
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      </Tabs>
 
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
